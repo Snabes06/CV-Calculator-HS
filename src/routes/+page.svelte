@@ -1,5 +1,5 @@
 <script lang="ts">
-import { error } from '@sveltejs/kit';
+import { error, json } from '@sveltejs/kit';
 import { onMount } from 'svelte';
 import { writable } from 'svelte/store';
 
@@ -7,13 +7,22 @@ import { writable } from 'svelte/store';
 let loading = false;
 let out: any = {};
 
-// SKYBLOCK PROPERTIES
+// SKYBLOCK VARIABLES
 let player_name = '';
 let SBData: any;
 let SBProfile: any;
-const stats = writable<{ mining?: number; farming?: number; combat?: number } | null>(null);
-let combat_xp: any = 0;
+let skill_data: any;
 
+// SKILL INFO
+type SkillInfo = {
+    level: number;
+    overflow: number;
+    expToNext: number;
+};
+
+const skills = writable<Record<string, SkillInfo>>({});
+
+// RARITY INFO
 type Rarity = "COMMON" | "UNCOMMON" | "RARE" | "EPIC" | "LEGENDARY" | "MYTHIC" | "SPECIAL" | "DIVINE";
 
 const RarityColors: Record<Rarity, string> = {
@@ -74,12 +83,27 @@ async function getSkyblockData() {
 
         console.log(player);
 
-        // PLAYER SKILL EXP
-        stats.set({
-            mining: player.player_data.experience.SKILL_MINING,
-            farming: player.player_data.experience.SKILL_FARMING,
-            combat: player.player_data.experience.SKILL_COMBAT
-        });
+        // PLAYER COMBAT SKILL EXP
+        await getSkillData();
+
+        console.log(skill_data);
+
+        const skillNames = ['COMBAT'];
+        const skillObj: Record<string, SkillInfo> = {};
+
+        for (const name of skillNames) {
+            const exp = player.player_data.experience[`SKILL_${name}`];
+            const levels = skill_data.skills[name].levels;
+            skillObj[name] = getSkillInfo(exp, levels);
+        }
+        skills.set(skillObj);
+
+        // INVENTORY CHECK
+        await getItemData();
+
+        
+
+
     } catch(err) {
         console.error(err);
     } finally {
@@ -106,10 +130,28 @@ async function getSkillData() {
     try {
         const resp = await fetch('https://api.hypixel.net/v2/resources/skyblock/skills');
         if (!resp) throw new Error('API error skill data');
-        const data = await resp.json();
+        skill_data = await resp.json();
     } catch (err) {
         console.error(err);
     }
+}
+
+function getSkillInfo(exp: number, levels: any[]): SkillInfo {
+    const idx = getSkillLevelIndex(exp, levels);
+    const currentExp = levels[idx].totalExpRequired;
+    const nextExp = levels[idx + 1]?.totalExpRequired ?? currentExp;
+    return {
+        level: idx,
+        overflow: exp - currentExp,
+        expToNext: idx < levels.length - 1 ? nextExp - exp : 0
+    };
+}
+
+function getSkillLevelIndex(exp: number, levels: any[]) {
+    for (let i = levels.length - 1; i >= 0; i--) {
+        if (exp >= levels[i].totalExpRequired) return i;
+    }
+    return 0;
 }
 
 // GET SKYBLOCK ITEM RARITY COLOR
@@ -131,11 +173,11 @@ function getRarityClass(rarity: string) {
     </div>
 
     <div id="output-list">
-        {#if $stats}
-            <p>Farming XP: {$stats.farming ?? 'N/A'}</p>
-            <p>Mining XP: {$stats.mining ?? 'N/A'}</p>
-            <p>Combat XP: {$stats.combat ?? 'N/A'}</p>
-        {/if}
+      {#each Object.entries($skills) as [name, info]}
+          <p class="bg-blue-50 text-blue-900 rounded-md px-4 py-2 mb-2 shadow font-semibold border border-blue-200">{name} Lvl: <span class="font-bold">{Math.round(info.level)}</span></p>
+          <p class="bg-green-50 text-green-900 rounded-md px-4 py-2 mb-2 shadow font-semibold border border-green-200">{name} Overflow XP: <span class="font-bold">{Math.round(info.overflow)}</span></p>
+          <p class="bg-purple-50 text-purple-900 rounded-md px-4 py-2 mb-2 shadow font-semibold border border-purple-200">{name} XP to Next Level: <span class="font-bold">{Math.round(info.expToNext)}</span></p>
+        {/each}
         
 
    <!--     {#each out.items as item}
